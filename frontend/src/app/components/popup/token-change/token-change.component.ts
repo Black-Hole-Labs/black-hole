@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Output, inject, Input, Signal, computed, signal } from '@angular/core';
+import { Component, EventEmitter, Output, inject, Input, Signal, computed, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { BlockchainStateService } from '../../../services/blockchain-state.service';
@@ -16,10 +16,7 @@ export interface TokenDisplay extends Token {
   selector: 'app-token-change',
   standalone: true,
   templateUrl: './token-change.component.html',
-  styleUrls: [
-		'./token-change.component.scss',
-		'./token-change.component.adaptives.scss'
-	],
+  styleUrls: ['./token-change.component.scss', './token-change.component.adaptives.scss'],
   imports: [CommonModule, FormsModule, NetworkChangeFromPopupComponent],
 })
 export class TokenChangePopupComponent {
@@ -29,21 +26,23 @@ export class TokenChangePopupComponent {
   @Input() networkTokens: Token[] | undefined;
   @Input() excludeToken: Token | undefined;
   @Input() selectedToken: Token | undefined;
-  searchText = signal<string>(''); 
+  searchText = signal<string>('');
   tokenBalances = signal<Map<string, string>>(new Map());
   copiedAddresses = signal<Set<string>>(new Set<string>());
 
   selectedNetworkId = signal<number | undefined>(undefined);
   selectedNetworkTokens = signal<Token[]>([]);
-  
+
+  constructor() {}
+
   private tokenCache = new Map<number, Token[]>();
 
   private static selectedSellNetworkId: number | undefined = undefined;
   private static selectedBuyNetworkId: number | undefined = undefined;
-  
+
   blockchainStateService = inject(BlockchainStateService);
   walletBalanceService = inject(WalletBalanceService);
-  explorerUrl = computed(() => this.blockchainStateService.network()?.explorerUrl || "https://etherscan.io/token/");
+  explorerUrl = computed(() => this.blockchainStateService.network()?.explorerUrl || 'https://etherscan.io/token/');
   ethers = ethers;
 
   networks = computed(() => {
@@ -52,17 +51,17 @@ export class TokenChangePopupComponent {
     const first10 = all.slice(0, 10);
     const next = all[10];
     if (!selectedId) return all.slice(0, 11);
-    const selected = all.find(n => n.id === selectedId);
+    const selected = all.find((n) => n.id === selectedId);
     if (!selected) return all.slice(0, 11);
 
-    if (all.slice(0, 11).some(n => n.id === selectedId)) {
+    if (all.slice(0, 11).some((n) => n.id === selectedId)) {
       return all.slice(0, 11);
     }
- 
+
     return [...first10, selected];
   });
   currentNetwork = computed(() => this.blockchainStateService.network());
-  
+
   additionalNetworksCount = computed(() => {
     const totalNetworks = this.blockchainStateService.allNetworks().length;
     const displayedNetworks = 11;
@@ -71,38 +70,12 @@ export class TokenChangePopupComponent {
 
   tokenList: Signal<TokenDisplay[]> = computed(() => {
     const search = this.searchText().toLowerCase().trim();
+    const tokens = this.getBaseTokens();
+    const filteredBySearch = this.filterBySearch(tokens, search);
+    const filteredByExclude = this.filterByExcludeToken(filteredBySearch);
 
-    let tokens: Token[];
-    if (search) {
-      tokens = this.blockchainStateService.allTokens();
-    } 
-    else {
-      if (this.selectedNetworkId()) {
-        tokens = this.selectedNetworkTokens();
-      } else if (this.networkTokens?.length) {
-        tokens = this.networkTokens;
-      } else {
-        tokens = this.blockchainStateService.filteredTokens();
-      }
-    }
-
-    let filteredTokens = tokens;
-    if (search) {
-      filteredTokens = tokens.filter((token: Token) =>
-        token.symbol.toLowerCase().includes(search) ||
-        token.contractAddress.toLowerCase().includes(search)
-      );
-    }
-
-    if (this.mode === 'buy' && this.excludeToken) {
-      filteredTokens = filteredTokens.filter(token =>
-        token.contractAddress !== this.excludeToken!.contractAddress
-      );
-    }
-
-    return filteredTokens as TokenDisplay[];
+    return filteredByExclude as TokenDisplay[];
   });
-
 
   displayedTokens: Signal<TokenDisplay[]> = computed(() => {
     return (this.tokenList() || []).slice(0, 15);
@@ -114,19 +87,14 @@ export class TokenChangePopupComponent {
     if (!this.mode) {
       throw new Error('Mode is required! Pass "sell" or "buy" to the mode input.');
     }
-    
- 
-    let networkToUse: number | undefined;
-    
-    if (this.mode === 'sell') {
 
+    let networkToUse: number | undefined;
+
+    if (this.mode === 'sell') {
       networkToUse = TokenChangePopupComponent.selectedSellNetworkId || this.blockchainStateService.network()?.id;
     } else {
-
-
       networkToUse = TokenChangePopupComponent.selectedBuyNetworkId || this.blockchainStateService.network()?.id;
     }
-    
 
     if (networkToUse && !this.networkTokens?.length) {
       this.selectedNetworkId.set(networkToUse);
@@ -139,7 +107,7 @@ export class TokenChangePopupComponent {
         this.loadTokensForNetwork(currentNetworkId);
       }
     }
-    
+
     if (this.blockchainStateService.connected()) {
       this.loadDisplayedBalances();
     }
@@ -148,7 +116,7 @@ export class TokenChangePopupComponent {
   async loadDisplayedBalances(): Promise<void> {
     const list = this.displayedTokens();
     const balances = new Map<string, string>();
-    
+
     for (const token of list) {
       try {
         const balance = await this.walletBalanceService.getBalanceForToken(token);
@@ -158,17 +126,16 @@ export class TokenChangePopupComponent {
         balances.set(token.contractAddress, '0');
       }
     }
-    
+
     this.tokenBalances.set(balances);
   }
 
   async loadTokensForNetwork(networkId: number): Promise<void> {
-
     if (this.tokenCache.has(networkId)) {
       this.selectedNetworkTokens.set(this.tokenCache.get(networkId)!);
       return;
     }
-    
+
     try {
       const tokens = await this.blockchainStateService.fetchTokensForNetwork(networkId);
       this.tokenCache.set(networkId, tokens);
@@ -178,7 +145,7 @@ export class TokenChangePopupComponent {
       this.selectedNetworkTokens.set([]);
     }
   }
-  
+
   getTokenBalance(token: Token): string {
     return this.tokenBalances()?.get(token.contractAddress) || '0';
   }
@@ -202,19 +169,22 @@ export class TokenChangePopupComponent {
 
   copyToClipboard(address: string, event: Event): void {
     event.stopPropagation();
-    navigator.clipboard.writeText(address).then(() => {
-      const currentCopied = this.copiedAddresses();
-      const newCopied = new Set(currentCopied);
-      newCopied.add(address);
-      this.copiedAddresses.set(newCopied);
-      
-      setTimeout(() => {
+    navigator.clipboard
+      .writeText(address)
+      .then(() => {
         const currentCopied = this.copiedAddresses();
         const newCopied = new Set(currentCopied);
-        newCopied.delete(address);
+        newCopied.add(address);
         this.copiedAddresses.set(newCopied);
-      }, 2000);
-    }).catch(() => console.error('Failed to copy to clipboard'));
+
+        setTimeout(() => {
+          const currentCopied = this.copiedAddresses();
+          const newCopied = new Set(currentCopied);
+          newCopied.delete(address);
+          this.copiedAddresses.set(newCopied);
+        }, 2000);
+      })
+      .catch(() => console.error('Failed to copy to clipboard'));
   }
 
   isCopied(address: string): boolean {
@@ -228,7 +198,7 @@ export class TokenChangePopupComponent {
     if (currentNetwork.chainType === 'SVM') {
       return token.symbol === 'SOL';
     }
-    
+
     return token.contractAddress === ethers.ZeroAddress;
   }
 
@@ -249,20 +219,19 @@ export class TokenChangePopupComponent {
   }
 
   async selectNetwork(network: Network): Promise<void> {
-
     if (this.selectedNetworkId() === network.id) {
-      return; 
+      return;
     }
-    
-    if(!this.blockchainStateService.connected()){
+
+    if (!this.blockchainStateService.connected()) {
       this.selectedNetworkId.set(network.id);
       await this.loadTokensForNetwork(network.id);
     }
-   
+
     if (this.mode === 'sell') {
       TokenChangePopupComponent.selectedSellNetworkId = network.id;
 
-      if(!this.blockchainStateService.connected()){
+      if (!this.blockchainStateService.connected()) {
         this.blockchainStateService.updateNetwork(network.id);
       }
 
@@ -271,20 +240,19 @@ export class TokenChangePopupComponent {
         console.error('No provider selected');
         return;
       }
-      
+
       const provider = currentProvider.provider;
-      await provider.switchNetwork(network);
+      // await provider.switchNetwork(network);
       this.blockchainStateService.updateNetwork(network.id);
       this.blockchainStateService.updateWalletAddress(provider.address);
-      
     } else {
       TokenChangePopupComponent.selectedBuyNetworkId = network.id;
     }
 
     // this.selectedNetworkId.set(network.id);
     // await this.loadTokensForNetwork(network.id);
-    
-   if(this.blockchainStateService.connected()){
+
+    if (this.blockchainStateService.connected()) {
       this.selectedNetworkId.set(network.id);
       await this.loadTokensForNetwork(network.id);
     }
@@ -293,7 +261,6 @@ export class TokenChangePopupComponent {
       this.loadDisplayedBalances();
     }
 
-   
     if (this.blockchainStateService.connected() && this.mode === 'sell') {
       const currentProvider = this.blockchainStateService.getCurrentProvider();
       if (!currentProvider) {
@@ -312,11 +279,10 @@ export class TokenChangePopupComponent {
   }
 
   isCurrentNetwork(network: Network): boolean {
-   
     if (this.selectedNetworkId()) {
       return this.selectedNetworkId() === network.id;
     }
-  
+
     return this.currentNetwork()?.id === network.id;
   }
 
@@ -327,9 +293,35 @@ export class TokenChangePopupComponent {
   openNetworkChangeFrom(): void {
     this.showNetworkChangeFrom.set(true);
   }
-  
+
   onNetworkSelected(network: Network): void {
     this.selectNetwork(network);
     this.showNetworkChangeFrom.set(false);
+  }
+
+  private getBaseTokens(): Token[] {
+    if (this.selectedNetworkId()) {
+      return this.selectedNetworkTokens();
+    }
+
+    if (this.networkTokens?.length) {
+      return this.networkTokens;
+    }
+
+    return this.blockchainStateService.filteredTokens();
+  }
+
+  private filterBySearch(tokens: Token[], search: string): Token[] {
+    if (!search) return tokens;
+
+    return tokens.filter(
+      (token) => token.symbol.toLowerCase().includes(search) || token.contractAddress.toLowerCase().includes(search),
+    );
+  }
+
+  private filterByExcludeToken(tokens: Token[]): Token[] {
+    if (!this.excludeToken) return tokens;
+
+    return tokens.filter((token) => token.contractAddress !== this.excludeToken!.contractAddress);
   }
 }

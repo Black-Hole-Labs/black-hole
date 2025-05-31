@@ -32,7 +32,7 @@ export class FooterComponent implements OnInit, OnDestroy {
 
     effect(
       () => {
-        const token = this.tokenService.getSelectedToken();
+        const token = this.tokenService.getSelectedBuyToken();
         this.isStopBlockFetching = false;
         if (!token) return;
 
@@ -66,7 +66,7 @@ export class FooterComponent implements OnInit, OnDestroy {
     if (this.isStopBlockFetching) return;
 
     try {
-      const token = this.tokenService.getSelectedToken();
+      const token = this.tokenService.getSelectedBuyToken();
       if (!token) return;
 
       if (token.chainId === NetworkId.SOLANA_MAINNET) {

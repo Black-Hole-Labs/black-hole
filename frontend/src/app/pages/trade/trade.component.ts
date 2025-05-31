@@ -74,8 +74,8 @@ export class TradeComponent implements AfterViewChecked {
   slippage: number = 0.005; // 0.005 is default for LIFI
   gasPriceUSD: number | undefined;
 
-  selectedToken = signal<Token | undefined>(undefined);
-  selectedBuyToken = signal<Token | undefined>(undefined);
+  selectedSellToken: Token | undefined = undefined;
+  selectedBuyToken: Token | undefined = undefined;
   //showConnectWalletPopup: boolean = false;
   txData = signal<TransactionRequestEVM | TransactionRequestSVM | undefined>(undefined);
 
@@ -104,8 +104,8 @@ export class TradeComponent implements AfterViewChecked {
   allFieldsReady = computed(
     () =>
       !!this.blockchainStateService.network() &&
-      this.selectedToken() !== undefined &&
-      this.selectedBuyToken() !== undefined &&
+      this.tokenService.getSelectedSellToken() !== undefined &&
+      this.tokenService.getSelectedBuyToken() !== undefined &&
       this.validatedSellAmount() !== 0,
   );
 
@@ -144,6 +144,10 @@ export class TradeComponent implements AfterViewChecked {
     this.inputFontSize.set(this.defaultFontSizeByScreenWidth());
 
     this.initializeNetworks();
+    effect(() => {
+      this.selectedSellToken = this.tokenService.getSelectedSellToken();
+      this.selectedBuyToken = this.tokenService.getSelectedBuyToken();
+    });
 
     effect(
       () => {
@@ -171,18 +175,17 @@ export class TradeComponent implements AfterViewChecked {
         const newSelectedToken = tokens.length > 0 ? tokens[0] : undefined;
         const newSelectedBuyToken = tokens.length > 1 ? tokens[1] : undefined;
 
-        this.selectedToken.set(newSelectedToken);
-        this.tokenService.setSelectedToken(newSelectedToken);
-        this.selectedBuyToken.set(newSelectedBuyToken);
+        this.tokenService.setSelectedSellToken(newSelectedToken);
+        this.tokenService.setSelectedBuyToken(newSelectedBuyToken);
         this.updateNetworksBasedOnTokens();
 
         if (!this.blockchainStateService.connected()) {
           return;
         }
         Promise.resolve().then(() => {
-          if (this.selectedToken()) {
+          if (this.tokenService.getSelectedSellToken()) {
             this.walletBalanceService
-              .getBalanceForToken(this.selectedToken()!)
+              .getBalanceForToken(this.tokenService.getSelectedSellToken()!)
               .then((balanceStr) => {
                 this.balance.set(Number(parseFloat(balanceStr)));
               })
@@ -192,9 +195,9 @@ export class TradeComponent implements AfterViewChecked {
               });
           }
 
-          if (this.selectedBuyToken()) {
+          if (this.tokenService.getSelectedBuyToken()) {
             this.walletBalanceService
-              .getBalanceForToken(this.selectedBuyToken()!)
+              .getBalanceForToken(this.tokenService.getSelectedBuyToken()!)
               .then((balanceStr) => {
                 this.balanceBuy.set(Number(parseFloat(balanceStr)));
               })
@@ -359,8 +362,8 @@ export class TradeComponent implements AfterViewChecked {
     this.buttonState = 'swap';
 
     // Сохраняем текущие значения
-    const tempToken = this.selectedToken();
-    const tempBuyToken = this.selectedBuyToken();
+    const tempToken = this.tokenService.getSelectedSellToken();
+    const tempBuyToken = this.tokenService.getSelectedBuyToken();
     const tempBalance = this.balance();
     const tempBalanceBuy = this.balanceBuy();
     const tempSellAmount = this.validatedSellAmount();
@@ -368,8 +371,9 @@ export class TradeComponent implements AfterViewChecked {
     const tempSellNetwork = this.sellNetwork();
     const tempBuyNetwork = this.buyNetwork();
 
-    this.selectedToken.set(tempBuyToken);
-    this.selectedBuyToken.set(tempToken);
+    // this.selectedToken.set(tempBuyToken);
+    this.tokenService.setSelectedBuyToken(tempToken);
+    this.tokenService.setSelectedSellToken(tempBuyToken);
 
     this.balance.set(tempBalanceBuy);
     this.balanceBuy.set(tempBalance);
@@ -425,10 +429,9 @@ export class TradeComponent implements AfterViewChecked {
     this.popupService.closePopup('tokenChangeSell');
   }
 
-  async onTokenSelected(token: Token): Promise<void> {
+  async onSellTokenSelected(token: Token): Promise<void> {
     this.txData.set(undefined);
-    this.selectedToken.set(token);
-    this.tokenService.setSelectedToken(token);
+    this.tokenService.setSelectedSellToken(token);
     this.userSelectedTokens = true;
     this.balance.set(Number(parseFloat(await this.walletBalanceService.getBalanceForToken(token))));
   }
@@ -443,7 +446,7 @@ export class TradeComponent implements AfterViewChecked {
 
   async onBuyTokenSelected(token: Token): Promise<void> {
     this.txData.set(undefined);
-    this.selectedBuyToken.set(token);
+    this.tokenService.setSelectedBuyToken(token);
     this.userSelectedTokens = true; // Пользователь выбрал токен
     this.balanceBuy.set(Number(parseFloat(await this.walletBalanceService.getBalanceForToken(token)).toFixed(6)));
     this.closeTokenBuyPopup();
@@ -530,9 +533,15 @@ export class TradeComponent implements AfterViewChecked {
     }, 5000);
 
     try {
-      this.balance.set(Number(parseFloat(await this.walletBalanceService.getBalanceForToken(this.selectedToken()!))));
+      this.balance.set(
+        Number(
+          parseFloat(await this.walletBalanceService.getBalanceForToken(this.tokenService.getSelectedSellToken()!)),
+        ),
+      );
       this.balanceBuy.set(
-        Number(parseFloat(await this.walletBalanceService.getBalanceForToken(this.selectedBuyToken()!))),
+        Number(
+          parseFloat(await this.walletBalanceService.getBalanceForToken(this.tokenService.getSelectedBuyToken()!)),
+        ),
       );
     } catch (error) {
       // console.log("error setting balance",error);
@@ -559,10 +568,10 @@ export class TradeComponent implements AfterViewChecked {
 
   async evmSwap(): Promise<string> {
     const provider = this.blockchainStateService.getCurrentProvider().provider;
-
+    await provider.switchNetwork(this.buyNetwork()!);
     const signer = await provider.signer;
 
-    const fromToken = this.selectedToken()!.contractAddress;
+    const fromToken = this.tokenService.getSelectedSellToken()!.contractAddress;
     if (fromToken === ethers.ZeroAddress) {
       const txHash = await provider.sendTx(this.txData());
       this.showPendingNotification = true;
@@ -580,7 +589,7 @@ export class TradeComponent implements AfterViewChecked {
     );
 
     //const fromAddress = this.blockchainStateService.walletAddress()!;
-    const fromTokenDecimals = this.selectedToken()!.decimals;
+    const fromTokenDecimals = this.tokenService.getSelectedSellToken()!.decimals;
     const amount = this.transactionsService.toNonExponential(this.validatedSellAmount());
     const approveAmount = parseUnits(amount, fromTokenDecimals);
 
@@ -624,13 +633,13 @@ export class TradeComponent implements AfterViewChecked {
     this.buttonState = 'finding';
     const fromChain = this.sellNetwork()!.id.toString();
     const toChain = this.buyNetwork()!.id.toString();
-    const fromTokenDecimals = this.selectedToken()!.decimals;
+    const fromTokenDecimals = this.tokenService.getSelectedSellToken()!.decimals;
     // console.log("this.validatedSellAmount()",this.validatedSellAmount());
     const formattedFromAmount = this.transactionsService.toNonExponential(this.validatedSellAmount());
     const fromAmount = parseUnits(formattedFromAmount, fromTokenDecimals);
-    const fromToken = this.selectedToken()!.contractAddress;
-    const toToken = this.selectedBuyToken()!.contractAddress;
-    const toTokenDecimals = this.selectedBuyToken()!.decimals;
+    const fromToken = this.tokenService.getSelectedSellToken()!.contractAddress;
+    const toToken = this.tokenService.getSelectedBuyToken()!.contractAddress;
+    const toTokenDecimals = this.tokenService.getSelectedBuyToken()!.decimals;
 
     let fromAddress = '';
     let toAddress = this.customAddress() !== '' ? this.customAddress() : undefined;
@@ -919,7 +928,7 @@ export class TradeComponent implements AfterViewChecked {
     if (
       this.buyAmountTextElement &&
       !this.buyAmountTextAnimated &&
-      this.selectedBuyToken()?.symbol &&
+      this.tokenService.getSelectedBuyToken()?.symbol &&
       this.validatedSellAmount() > 0 &&
       this.buyAmountForInput()
     ) {
@@ -1099,7 +1108,7 @@ export class TradeComponent implements AfterViewChecked {
       const sellNet = allNetworks.find((n) => n.id === selectedSellNetworkId);
       this.sellNetwork.set(sellNet);
     } else {
-      const sellToken = this.selectedToken();
+      const sellToken = this.tokenService.getSelectedSellToken();
       if (sellToken) {
         const tokenNetwork = allNetworks.find((n) => n.id === sellToken.chainId);
         this.sellNetwork.set(tokenNetwork || this.blockchainStateService.network() || undefined);
@@ -1112,7 +1121,7 @@ export class TradeComponent implements AfterViewChecked {
       const buyNet = allNetworks.find((n) => n.id === selectedBuyNetworkId);
       this.buyNetwork.set(buyNet);
     } else {
-      const buyToken = this.selectedBuyToken();
+      const buyToken = this.tokenService.getSelectedBuyToken();
       if (buyToken) {
         const tokenNetwork = allNetworks.find((n) => n.id === buyToken.chainId);
         this.buyNetwork.set(tokenNetwork || this.blockchainStateService.network() || undefined);
@@ -1133,7 +1142,7 @@ export class TradeComponent implements AfterViewChecked {
         this.sellNetwork.set(sellNet);
       }
     } else {
-      const sellToken = this.selectedToken();
+      const sellToken = this.tokenService.getSelectedSellToken();
       if (sellToken) {
         const tokenNetwork = allNetworks.find((n) => n.id === sellToken.chainId);
         const networkToSet = tokenNetwork || this.blockchainStateService.network() || undefined;
@@ -1149,7 +1158,7 @@ export class TradeComponent implements AfterViewChecked {
         this.buyNetwork.set(buyNet);
       }
     } else {
-      const buyToken = this.selectedBuyToken();
+      const buyToken = this.tokenService.getSelectedBuyToken();
       if (buyToken) {
         const tokenNetwork = allNetworks.find((n) => n.id === buyToken.chainId);
         const networkToSet = tokenNetwork || this.blockchainStateService.network() || undefined;
