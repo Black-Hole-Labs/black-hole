@@ -40,9 +40,11 @@ export class EvmWalletProvider implements WalletProvider {
     try
     {
       ens = await ethersProvider.lookupAddress(this.address);
+      console.log("ens: ", ens);
     }
     catch(e)
     {
+      console.log("error during lookupAddress: ", e);
       // it can probably throw
       ens = null;
     }
